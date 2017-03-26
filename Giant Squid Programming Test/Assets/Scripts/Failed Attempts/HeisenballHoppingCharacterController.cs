@@ -160,13 +160,13 @@ public class HeisenballHoppingCharacterController : MonoBehaviour {
             float journeyLength = Quaternion.Angle(startingRot, Quaternion.identity);
 
             // until we are are the capsule rotation ..
-            while (Time.time - startTime * returnToCapsuleSpeed <= 1)
+            while ((Time.time - startTime * returnToCapsuleSpeed) / journeyLength <= 1)
             {
                 // Slerp us to it based on the speed
                 playerRB.rotation = Quaternion.Slerp(
                     startingRot,
                     Quaternion.identity,
-                    Time.time - startTime * returnToCapsuleSpeed);
+                    Time.time - startTime * returnToCapsuleSpeed / journeyLength);
                 // .. and proceed forward a frame
                 yield return null;
             }
