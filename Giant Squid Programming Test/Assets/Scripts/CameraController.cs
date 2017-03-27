@@ -14,7 +14,8 @@ public class CameraController : MonoBehaviour {
 
     [Header("Player Orbiting")]
     public Transform player;                // Get Reference to the player, should probably use the ball, since it's transform will never move
-    public float camSensitivity = 10;            // How fast the camera should orbit the player
+    public float cameraFollowSpeed;         // How fast the camera should be following the player controller
+    public float camSensitivity = 10;       // How fast the camera should orbit the player
     [Range(-180f, 0f)]
     public float pitchMin = -90f;           // The lowest angle we should be able to see the player from
     [Range(0f, 180f)]
@@ -57,7 +58,7 @@ public class CameraController : MonoBehaviour {
         
     }
 
-    void Update ()
+    void FixedUpdate ()
     {
         // TODO Make it so we can break from orbiting the player to view the goal
         if (Input.GetButton("View Goal") && viewPoints.Length > 0)
@@ -76,6 +77,7 @@ public class CameraController : MonoBehaviour {
         currentViewPointIndex = 0;
 
         // Handle Orbiting the Player
+        //transform.localPosition = Vector3.Lerp(transform.localPosition, player.localPosition + rigOffset, Time.deltaTime * cameraFollowSpeed);
         transform.localPosition = player.localPosition + rigOffset;
         RotateCamera();
         FixCameraObstructions();

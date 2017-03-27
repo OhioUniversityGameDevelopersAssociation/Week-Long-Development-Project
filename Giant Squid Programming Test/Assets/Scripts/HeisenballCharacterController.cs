@@ -9,7 +9,7 @@ using UnityEngine;
 public class HeisenballCharacterController : MonoBehaviour {
 
     [Header("Player Movement")]
-    [Range(1f, 10f)]
+    /*[Range(1f, 100f)]*/
     public float movementSpeed = 5f;        // The speed at which our character should move in capsule form
     // TODO Fix this
     public float rotationSpeed = 2f;        // The speed at which our character should move to face the movement direction in capsule form
@@ -27,13 +27,14 @@ public class HeisenballCharacterController : MonoBehaviour {
 
     [Header("Jumping")]
     public float jumpForce = 1f;            // The force in meters per second we apply to our character when jumping
-    public bool jumpInProgress = false;
+    public bool jumpInProgress = true;
     public float distToGround = 0.1f;       // The distance from the our ground-checking raycast will travel to look for ground
 
     // Input Values. These are updated by unity in Update(), but we want to run physics 
     // in FixedUpdate(), so we'll grab the input we need every frame and pass it to FixedUpdate()
     bool jumpQueued = false;
-    bool ballInput = false;
+
+    public bool tempBool;
 
 
     private void Start ()
@@ -48,19 +49,12 @@ public class HeisenballCharacterController : MonoBehaviour {
     // Mostly used for input
     private void Update()
     {
-        // Get Input from Left stick
-        float horizontal = Input.GetAxis("Horizontal");
-        float vertical = Input.GetAxis("Vertical");
-        
-        camForward = Vector3.Scale(cam.forward, new Vector3(1, 0, 1)).normalized;
-        movement = (vertical * camForward + horizontal * cam.right).normalized;
-
-
-        ballInput = Input.GetButton("Ball Form");
-
-        // I want the player to be able to queue their jump while hopping, so we'll get this
-        // input only when the jump isn't queued already
-        if (!jumpQueued)
+        // Unfortunately, input events update in Update() in Unity. So if we want to get GetButtonDown() or
+        // GetButtonDown(). We are only tracking the jumpin this manner because if we used GetButton, we would
+        // simply miss jump inputs, if we simply used GetButtonDown(), we . We would be doing everything in Update, 
+        // but the physics system operates in FixedUpdate(). We phrase it this way because Update typically runs
+        // faster than 
+        if (!jumpQueued && !jumpInProgress)
         {
             jumpQueued = Input.GetButtonDown("Jump");
         }
@@ -68,30 +62,36 @@ public class HeisenballCharacterController : MonoBehaviour {
 
     private void FixedUpdate()
     {
-        // Set the animation param to match the movement (we do this in FixedUpdate() instead of Update() because the animator is set to match physics
-        anim.SetBool("Moving", movement != Vector3.zero);
 
         // If we are entering or exiting the ball form ..
-        if (ballInput && !isBall)
+        if (Input.GetButton("Ball Form") && !isBall)
         {
             BecomeBall();
         }
-        else if(!ballInput && isBall)
+        // if we have met all the criteria for turning into a capsule
+        else if (!Input.GetButton("Ball Form") && isBall)
         {
             BecomeCapsule();
         }
+
+        // Get Input from Left stick
+        float horizontal = Input.GetAxis("Horizontal");
+        float vertical = Input.GetAxis("Vertical");
+
+        camForward = Vector3.Scale(cam.forward, new Vector3(1, 0, 1)).normalized;
+        movement = (vertical * camForward + horizontal * cam.right);
+
+        // Set the animation param to match the movement (we do this in FixedUpdate() instead of Update() because the animator is set to match physics
+        anim.SetBool("Moving", movement != Vector3.zero);
+        anim.SetFloat("MovementSpeed", movement.magnitude);
+
+        
 
         // If we are in Capsule Form ..
         if (!isBall && returnedToCapsule)
         {
             HandleCapsuleMovement();
-
-            // If we are on the ground, not already starting a jump, and are attempting to jump ..
-            if (IsGrounded() && jumpQueued && !jumpInProgress)
-            {
-                // .. Jump!
-                StartCoroutine(Jump());
-            }
+            HandleJumping();
         }
         else // if we are currently in ball form
         {
@@ -100,9 +100,129 @@ public class HeisenballCharacterController : MonoBehaviour {
 
         // We want to reset jump input at the end of each fixed update frame, to make sure we only jump when we need to
         jumpQueued = false;
+
+        
     }
 
-    private void RotateBackToCapsule()
+    private void HandleJumping()
+    {
+        // If we are on the ground, and are attempting to jump ..
+        if (IsGrounded() && jumpQueued && !jumpInProgress)
+        {
+            /* .. Jump!
+            jumpInProgress = true;
+            StartCoroutine(Jump());*/
+            anim.SetTrigger("Jump");
+            jumpInProgress = true;
+        }
+        else if (jumpInProgress && anim.GetCurrentAnimatorStateInfo(0).IsName("TransitionToHang"))
+        {
+            // Apply upwards force to the player when it appears we should in the animation
+            playerRB.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+
+            jumpInProgress = false;
+        }
+    }
+
+    private bool IsGrounded()
+    {
+        // First, Raycast Downward to see if we are on the ground
+        bool grounded = Physics.Raycast(transform.position, -Vector3.up, distToGround);
+        anim.SetBool("Grounded", grounded);
+
+        // When mashing the A button, we noticed we could get a higher jump because 
+        // multiple jump coroutines would get started at the same time. To solve this,
+        // we are going to make sure that our 
+        //if(anim.GetCurrentAnimatorStateInfo(0).IsName("TransitionToHang"))
+
+        return grounded;
+    }
+
+    // TODO I want to turn this into a cute little hop instead of a gliding motion
+    private void HandleCapsuleMovement()
+    {
+
+        playerRB.MovePosition(playerRB.position + movement * Time.fixedDeltaTime * movementSpeed);
+        /*
+        movement *= Time.fixedDeltaTime * movementSpeed;
+        playerRB.velocity = new Vector3(movement.x, playerRB.velocity.y, movement.z);
+        Debug.Log(playerRB.velocity);
+        */
+        // Check so that the player doesn't rotate to origin when there is no input
+        if (movement != Vector3.zero)
+        {
+            // Set player direction to movement direction
+            playerRB.MoveRotation(Quaternion.LookRotation(movement));
+        }
+    }
+
+    private void BecomeCapsule()
+    {
+        // Set our flag so we know we are no longer in ball form
+        isBall = false;
+
+        // Constrain the axes so the player doesn't fall over
+        playerRB.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        StartCoroutine(ReturnToCapsule());
+    }
+
+    private void BecomeBall()
+    {
+        // .. Start the animation and free our rotation axes
+        if(!anim.GetCurrentAnimatorStateInfo(0).IsName("EnterBallForm") &&
+            !anim.GetCurrentAnimatorStateInfo(0).IsName("BallForm") &&
+            !anim.GetCurrentAnimatorStateInfo(0).IsName("ExitBallForm"))
+        anim.SetTrigger("Start Ball");
+        playerRB.constraints = RigidbodyConstraints.None;
+        isBall = true;
+    }
+
+    private IEnumerator ReturnToCapsule()
+    {
+        // Flag that we are not yet in capsule form
+        returnedToCapsule = false;
+
+        // If we are not back to an upright rotation ..
+        if (playerRB.rotation != Quaternion.identity)
+        {
+
+            // Note the rotation we started at when exiting ball form
+            Quaternion startingRot = playerRB.rotation;
+
+            // Set up the params measuring return progress
+            float startTime = Time.time;
+            float journeyLength = Quaternion.Angle(startingRot, Quaternion.identity);
+
+            // Until we are at the proper capsule rotation ..
+            while (((Time.time - startTime) * returnToCapsuleSpeed) / journeyLength <= 1)
+            {
+                // Slerp us to it based on the speed
+                playerRB.rotation = Quaternion.Slerp(
+                    startingRot,
+                    Quaternion.identity,
+                    ((Time.time - startTime) * returnToCapsuleSpeed) / journeyLength);
+                // .. and proceed forward a frame
+                yield return null;
+            }
+
+            // When finished, Ensure our player is back at the desired rotation
+            playerRB.rotation = Quaternion.identity;
+        }
+        
+        
+
+        // resume player controls
+        returnedToCapsule = true;
+
+        // Set the animator to return to the capsule
+        if (anim.GetCurrentAnimatorStateInfo(0).IsName("EnterBall") ||
+            anim.GetCurrentAnimatorStateInfo(0).IsName("BallForm") || (anim.IsInTransition(0) && anim.GetAnimatorTransitionInfo(0).anyState))
+        {
+            anim.SetTrigger("Exit Ball");
+        }
+    }
+
+    /*private void RotateBackToCapsule()
     {
         // Rotate towards the identity rotation
         playerRB.rotation = Quaternion.Slerp(playerRB.rotation, Quaternion.identity, Time.fixedDeltaTime * returnToCapsuleSpeed);
@@ -118,20 +238,17 @@ public class HeisenballCharacterController : MonoBehaviour {
             // Set flag as being finished with returning upright
             returnedToCapsule = true;
         }
-    }
+    }*/
 
-    private IEnumerator Jump()
+    // An attempt to keep player from mashing A to get higher jumps. Honestly an utter failure, and was 
+    // the longest thing to make a creative fix for. I tried using a coroutine to wait to
+    // apply the jump force until the end of an animation. Finally realized, I can queue it without using
+    // Coroutines.
+    /*private IEnumerator Jump()
     {
-        // We need to make sure this Coroutine doesn't get started again next physics tick, so we'll set a flag to make sure we don't 
-        jumpInProgress = true;
-        // Reset our jump flag
-        jumpQueued = false;
-
         // Set us to play our jump animation in the editor
         anim.SetTrigger("Jump");
-
         
-
         // While we are waiting for the actuall lift of the ground part of the animation ..
         while (!anim.GetCurrentAnimatorStateInfo(0).IsName("TransitionToHang"))
         {
@@ -139,97 +256,6 @@ public class HeisenballCharacterController : MonoBehaviour {
             yield return null;
         }
 
-        // Reset our flag to let us know we can start a new jump next time we are grounded
-        jumpInProgress = false;
-
-        // Apply upwards force to the player when it appears we should in the animation
-        playerRB.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
-    }
-
-    private bool IsGrounded()
-    {
-        // Raycast Downward to see if we are on the ground
-        bool grounded = Physics.Raycast(transform.position + (Vector3.up * 0.1f), -Vector3.up, distToGround + 0.1f);
-        anim.SetBool("Grounded", grounded);
-        return grounded;
-    }
-
-    // TODO I want to turn this into a cute little hop instead of a gliding motion
-    private void HandleCapsuleMovement()
-    {
-        if (anim.GetCurrentAnimatorStateInfo(0).IsName("TransitionToHang"))
-        {
-            // Move the player to the position
-            //hopping = true;
-            //playerRB.AddForce(((Quaternion.Euler(0, hopAngle, 0) * Vector3.forward) + movement) * hopForce);
-            
-        }
-
-        //movement *= Time.fixedDeltaTime * movementSpeed;
-
-        playerRB.MovePosition(playerRB.position + movement * Time.fixedDeltaTime * movementSpeed);
-
-        // Check so that the player doesn't rotate to origin when there is no input
-        if (movement != Vector3.zero)
-        {
-            // Set player direction to movement direction
-            playerRB.MoveRotation(Quaternion.LookRotation(movement));
-        }
-    }
-
-    private void BecomeCapsule()
-    {
-        StartCoroutine(ReturnToCapsule());
-        isBall = false;
-    }
-
-    private void BecomeBall()
-    {
-        // .. Start the animation and free our rotation axes
-        anim.SetTrigger("Start Ball");
-        playerRB.constraints = RigidbodyConstraints.None;
-        isBall = true;
-    }
-
-    private IEnumerator ReturnToCapsule()
-    {
-        returnedToCapsule = false;
-
-        if (playerRB.rotation != Quaternion.identity)
-        {
-            // Flag that we are not finished returning to calsule rotation
-            returnedToCapsule = false;
-
-            // Note the rotation we started at when exiting ball form
-            Quaternion startingRot = playerRB.rotation;
-
-            // Set up the params measuring return progress
-            float startTime = Time.time;
-            float journeyLength = Quaternion.Angle(startingRot, Quaternion.identity);
-
-            // until we are are the capsule rotation ..
-            while (((Time.time - startTime) * returnToCapsuleSpeed) / journeyLength <= 1)
-            {
-                // Slerp us to it based on the speed
-                playerRB.rotation = Quaternion.Slerp(
-                    startingRot,
-                    Quaternion.identity,
-                    ((Time.time - startTime) * returnToCapsuleSpeed) / journeyLength);
-                // .. and proceed forward a frame
-                yield return null;
-            }
-
-            // Ensure our player is back at the desired rotation
-            playerRB.rotation = Quaternion.identity;
-        }
         
-        // Constrain the axes so the player doesn't fall over
-        playerRB.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-
-        // resume player controls
-        returnedToCapsule = true;
-
-        // Set the animator to return to the capsule
-        anim.SetTrigger("Exit Ball");
-    }
+    }*/
 }
